@@ -10,7 +10,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw
 
-from ...internal.MidiManager import MidiManager
+from plugins.com_github_pkern90_midi.internal.MidiManager import MidiManager
 
 
 # Common CC names for display
