@@ -1,9 +1,25 @@
 {
     "generic": {
-        "copyright": "",
-        "original-url": "",
-        "license": "",
-        "license-url": "",
-        "description": ""
+        "copyright": "pkern90",
+        "original-url": "https://github.com/pkern90/StreamController-Midi-Plugin",
+        "license": "MIT",
+        "license-url": "https://opensource.org/licenses/MIT",
+        "description": "MIDI Plugin for StreamController"
+    },
+    "assets/note.png": {
+        "copyright": "Placeholder - replace with custom MIDI note icon",
+        "license": "MIT"
+    },
+    "assets/cc.png": {
+        "copyright": "Placeholder - replace with custom CC icon",
+        "license": "MIT"
+    },
+    "assets/program.png": {
+        "copyright": "Placeholder - replace with custom program change icon",
+        "license": "MIT"
+    },
+    "assets/dial.png": {
+        "copyright": "Placeholder - replace with custom dial/volume icon",
+        "license": "MIT"
     }
 }
