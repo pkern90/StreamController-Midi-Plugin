@@ -84,8 +84,18 @@ class MidiDial(ActionBase):
             print(f"Failed to load MidiManager: {e}")
             self._midi_manager = None
 
+    def _lm(self, key: str) -> str:
+        """Get localized string with fallback to key."""
+        try:
+            return self.plugin_base.locale_manager.get(key)
+        except Exception:
+            return key
+
     def on_ready(self) -> None:
         """Called when the deck is fully loaded. Initialize the dial display."""
+        # Initialize settings with defaults if not set
+        self._ensure_default_settings()
+        
         settings = self.get_settings()
         self._current_value = settings.get("current_value", settings.get("default_value", 64))
         self._is_muted = settings.get("is_muted", False)
@@ -95,6 +105,28 @@ class MidiDial(ActionBase):
         # Send initial value if configured
         if settings.get("send_on_ready", False):
             self._send_cc_value()
+
+    def _ensure_default_settings(self):
+        """Ensure settings have default values."""
+        settings = self.get_settings()
+        defaults = {
+            "channel": 0,
+            "cc_number": 7,  # Volume
+            "step_size": 4,
+            "default_value": 64,
+            "min_value": 0,
+            "max_value": 127,
+            "press_action": "mute",
+            "display_mode": "value",
+            "send_on_ready": False,
+        }
+        changed = False
+        for key, default in defaults.items():
+            if key not in settings:
+                settings[key] = default
+                changed = True
+        if changed:
+            self.set_settings(settings)
 
     def on_dial_rotate(self, direction: int) -> None:
         """
@@ -192,11 +224,13 @@ class MidiDial(ActionBase):
     def _send_cc_value(self) -> None:
         """Send the current CC value via MIDI."""
         if not self._midi_manager:
+            self.show_error(duration=1)
             return
         
         settings = self.get_settings()
         port_name = settings.get("port", "")
         if not port_name:
+            self.show_error(duration=1)
             return
         
         channel = settings.get("channel", 0)
@@ -232,7 +266,7 @@ class MidiDial(ActionBase):
             value_text = str(self._current_value)
         
         if self._is_muted:
-            value_text = "MUTE"
+            value_text = self._lm("display.mute")
         
         self.set_top_label(cc_name, font_size=12)
         self.set_center_label(value_text, font_size=18)
@@ -251,14 +285,14 @@ class MidiDial(ActionBase):
     def _get_cc_name(self, cc_number: int) -> str:
         """Get a human-readable name for common CC numbers."""
         cc_names = {
-            0: "Bank MSB",
-            1: "Mod Wheel",
-            7: "Volume",
-            10: "Pan",
-            11: "Expression",
-            64: "Sustain",
-            91: "Reverb",
-            93: "Chorus",
+            0: self._lm("cc_name.bank_msb"),
+            1: self._lm("cc_name.mod_wheel"),
+            7: self._lm("cc_name.volume"),
+            10: self._lm("cc_name.pan"),
+            11: self._lm("cc_name.expression"),
+            64: self._lm("cc_name.sustain"),
+            91: self._lm("cc_name.reverb"),
+            93: self._lm("cc_name.chorus"),
         }
         return cc_names.get(cc_number, f"CC {cc_number}")
 
@@ -272,17 +306,9 @@ class MidiDial(ActionBase):
 
         # -- Port Selection --
         self.port_model = Gtk.ListStore(str)
-        ports = []
-        if self._midi_manager:
-            ports = self._midi_manager.get_output_ports()
+        self._refresh_port_list()
         
-        if not ports:
-            self.port_model.append(["No MIDI ports found"])
-        else:
-            for port in ports:
-                self.port_model.append([port])
-        
-        self.port_row = ComboRow(title="MIDI Output Port", model=self.port_model)
+        self.port_row = ComboRow(title=self._lm("config.port"), model=self.port_model)
         
         renderer = Gtk.CellRendererText()
         self.port_row.combo_box.pack_start(renderer, True)
@@ -298,10 +324,20 @@ class MidiDial(ActionBase):
         self.port_row.combo_box.connect("changed", self._on_port_changed)
         rows.append(self.port_row)
 
+        # -- Refresh Ports Button --
+        refresh_row = Adw.ActionRow()
+        refresh_row.set_title(self._lm("config.port.refresh"))
+        refresh_button = Gtk.Button()
+        refresh_button.set_icon_name("view-refresh-symbolic")
+        refresh_button.set_valign(Gtk.Align.CENTER)
+        refresh_button.connect("clicked", self._on_refresh_ports)
+        refresh_row.add_suffix(refresh_button)
+        rows.append(refresh_row)
+
         # -- Channel --
         self.channel_row = Adw.SpinRow.new_with_range(0, 15, 1)
-        self.channel_row.set_title("MIDI Channel")
-        self.channel_row.set_subtitle("0-15 (displayed as 1-16 in most DAWs)")
+        self.channel_row.set_title(self._lm("config.channel"))
+        self.channel_row.set_subtitle(self._lm("config.channel.subtitle"))
         self.channel_row.set_value(settings.get("channel", 0))
         self.channel_row.connect("notify::value", self._on_channel_changed)
         rows.append(self.channel_row)
@@ -309,13 +345,13 @@ class MidiDial(ActionBase):
         # -- CC Number Selection --
         self.cc_model = Gtk.ListStore(str, int)  # Display name, CC number
         cc_options = [
-            ("Volume (CC 7)", 7),
-            ("Pan (CC 10)", 10),
-            ("Expression (CC 11)", 11),
-            ("Modulation (CC 1)", 1),
-            ("Sustain (CC 64)", 64),
-            ("Reverb (CC 91)", 91),
-            ("Chorus (CC 93)", 93),
+            (self._lm("config.cc.volume"), 7),
+            (self._lm("config.cc.pan"), 10),
+            (self._lm("config.cc.expression"), 11),
+            (self._lm("config.cc.modulation"), 1),
+            (self._lm("config.cc.sustain"), 64),
+            (self._lm("config.cc.reverb"), 91),
+            (self._lm("config.cc.chorus"), 93),
         ]
         # Add common CCs
         for name, num in cc_options:
@@ -326,7 +362,7 @@ class MidiDial(ActionBase):
             if i not in used_ccs:
                 self.cc_model.append([f"CC {i}", i])
         
-        self.cc_row = ComboRow(title="Control Change Number", model=self.cc_model)
+        self.cc_row = ComboRow(title=self._lm("config.cc_number"), model=self.cc_model)
         cc_renderer = Gtk.CellRendererText()
         self.cc_row.combo_box.pack_start(cc_renderer, True)
         self.cc_row.combo_box.add_attribute(cc_renderer, "text", 0)
@@ -343,41 +379,41 @@ class MidiDial(ActionBase):
 
         # -- Step Size --
         self.step_row = Adw.SpinRow.new_with_range(1, 32, 1)
-        self.step_row.set_title("Step Size")
-        self.step_row.set_subtitle("How much the value changes per rotation tick")
+        self.step_row.set_title(self._lm("config.step_size"))
+        self.step_row.set_subtitle(self._lm("config.step_size.subtitle"))
         self.step_row.set_value(settings.get("step_size", 4))
         self.step_row.connect("notify::value", self._on_step_changed)
         rows.append(self.step_row)
 
         # -- Default Value --
         self.default_row = Adw.SpinRow.new_with_range(0, 127, 1)
-        self.default_row.set_title("Default Value")
-        self.default_row.set_subtitle("Value to reset to when dial is pressed (if reset mode)")
+        self.default_row.set_title(self._lm("config.default_value"))
+        self.default_row.set_subtitle(self._lm("config.default_value.subtitle"))
         self.default_row.set_value(settings.get("default_value", 64))
         self.default_row.connect("notify::value", self._on_default_changed)
         rows.append(self.default_row)
 
         # -- Min Value --
         self.min_row = Adw.SpinRow.new_with_range(0, 127, 1)
-        self.min_row.set_title("Minimum Value")
+        self.min_row.set_title(self._lm("config.min_value"))
         self.min_row.set_value(settings.get("min_value", 0))
         self.min_row.connect("notify::value", self._on_min_changed)
         rows.append(self.min_row)
 
         # -- Max Value --
         self.max_row = Adw.SpinRow.new_with_range(0, 127, 1)
-        self.max_row.set_title("Maximum Value")
+        self.max_row.set_title(self._lm("config.max_value"))
         self.max_row.set_value(settings.get("max_value", 127))
         self.max_row.connect("notify::value", self._on_max_changed)
         rows.append(self.max_row)
 
         # -- Press Action --
         self.press_model = Gtk.ListStore(str, str)  # Display, internal key
-        self.press_model.append(["Toggle Mute", "mute"])
-        self.press_model.append(["Reset to Default", "reset"])
-        self.press_model.append(["Send Current Value", "send_value"])
+        self.press_model.append([self._lm("config.press_action.mute"), "mute"])
+        self.press_model.append([self._lm("config.press_action.reset"), "reset"])
+        self.press_model.append([self._lm("config.press_action.send"), "send_value"])
         
-        self.press_row = ComboRow(title="Dial Press Action", model=self.press_model)
+        self.press_row = ComboRow(title=self._lm("config.press_action"), model=self.press_model)
         press_renderer = Gtk.CellRendererText()
         self.press_row.combo_box.pack_start(press_renderer, True)
         self.press_row.combo_box.add_attribute(press_renderer, "text", 0)
@@ -394,10 +430,10 @@ class MidiDial(ActionBase):
 
         # -- Display Mode --
         self.display_model = Gtk.ListStore(str, str)
-        self.display_model.append(["Value (0-127)", "value"])
-        self.display_model.append(["Percentage (0-100%)", "percent"])
+        self.display_model.append([self._lm("config.display_mode.value"), "value"])
+        self.display_model.append([self._lm("config.display_mode.percent"), "percent"])
         
-        self.display_row = ComboRow(title="Display Mode", model=self.display_model)
+        self.display_row = ComboRow(title=self._lm("config.display_mode"), model=self.display_model)
         display_renderer = Gtk.CellRendererText()
         self.display_row.combo_box.pack_start(display_renderer, True)
         self.display_row.combo_box.add_attribute(display_renderer, "text", 0)
@@ -414,13 +450,41 @@ class MidiDial(ActionBase):
 
         # -- Send on Ready --
         self.send_ready_row = Adw.SwitchRow()
-        self.send_ready_row.set_title("Send Value on Load")
-        self.send_ready_row.set_subtitle("Send the current value when the page loads")
+        self.send_ready_row.set_title(self._lm("config.send_on_ready"))
+        self.send_ready_row.set_subtitle(self._lm("config.send_on_ready.subtitle"))
         self.send_ready_row.set_active(settings.get("send_on_ready", False))
         self.send_ready_row.connect("notify::active", self._on_send_ready_changed)
         rows.append(self.send_ready_row)
 
         return rows
+
+    def _refresh_port_list(self):
+        """Refresh the list of available MIDI ports."""
+        self.port_model.clear()
+        ports = []
+        if self._midi_manager:
+            ports = self._midi_manager.get_output_ports()
+        
+        if not ports:
+            self.port_model.append([self._lm("config.port.no_ports")])
+        else:
+            for port in ports:
+                self.port_model.append([port])
+
+    def _on_refresh_ports(self, button):
+        """Handle refresh ports button click."""
+        settings = self.get_settings()
+        current_port = settings.get("port", "")
+        
+        self._refresh_port_list()
+        
+        # Try to reselect the current port
+        active_index = 0
+        for i, row in enumerate(self.port_model):
+            if row[0] == current_port:
+                active_index = i
+                break
+        self.port_row.combo_box.set_active(active_index)
 
     def _on_port_changed(self, combo):
         tree_iter = combo.get_active_iter()

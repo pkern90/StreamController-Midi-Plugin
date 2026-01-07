@@ -24,14 +24,48 @@ class MidiManager:
         if not port_name:
             return None
 
-        if port_name not in cls._output_ports:
+        # Check if we have a cached port
+        if port_name in cls._output_ports:
+            port = cls._output_ports[port_name]
+            # Check if the port is still valid
             try:
-                cls._output_ports[port_name] = mido.open_output(port_name)
-            except Exception as e:
-                print(f"Error opening MIDI port {port_name}: {e}")
-                return None
+                if port.closed:
+                    del cls._output_ports[port_name]
+                else:
+                    return port
+            except Exception:
+                # Port object is invalid, remove from cache
+                del cls._output_ports[port_name]
 
-        return cls._output_ports.get(port_name)
+        # Try to create a new port
+        try:
+            # Verify port still exists in system
+            available_ports = mido.get_output_names()
+            if port_name not in available_ports:
+                print(f"MIDI port '{port_name}' no longer available")
+                return None
+            
+            cls._output_ports[port_name] = mido.open_output(port_name)
+            return cls._output_ports[port_name]
+        except Exception as e:
+            print(f"Error opening MIDI port {port_name}: {e}")
+            return None
+
+    @classmethod
+    def close_port(cls, port_name):
+        """Close a specific MIDI port."""
+        if port_name in cls._output_ports:
+            try:
+                cls._output_ports[port_name].close()
+            except Exception:
+                pass
+            del cls._output_ports[port_name]
+
+    @classmethod
+    def close_all_ports(cls):
+        """Close all open MIDI ports."""
+        for port_name in list(cls._output_ports.keys()):
+            cls.close_port(port_name)
 
     @classmethod
     def send_note_on(cls, port_name, channel, note, velocity):
@@ -52,6 +86,19 @@ class MidiManager:
     def send_program_change(cls, port_name, channel, program):
         """Send a MIDI Program Change message."""
         cls.send_message(port_name, 'program_change', channel=int(channel), program=int(program))
+
+    @classmethod
+    def send_pitchwheel(cls, port_name, channel, pitch):
+        """Send a MIDI Pitch Wheel message.
+        
+        Args:
+            port_name (str): The name of the MIDI output port.
+            channel (int): The MIDI channel (0-15).
+            pitch (int): The pitch value (-8192 to 8191). 0 is center.
+        """
+        # Clamp pitch to valid range
+        pitch = max(-8192, min(8191, int(pitch)))
+        cls.send_message(port_name, 'pitchwheel', channel=int(channel), pitch=pitch)
 
     @classmethod
     def send_message(cls, port_name, msg_type, **kwargs):

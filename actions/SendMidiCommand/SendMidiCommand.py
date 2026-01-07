@@ -31,8 +31,34 @@ class SendMidiCommand(ActionBase):
             print(f"Failed to load MidiManager: {e}")
             self._midi_manager = None
 
+    def _lm(self, key: str) -> str:
+        """Get localized string with fallback to key."""
+        try:
+            return self.plugin_base.locale_manager.get(key)
+        except Exception:
+            return key
+
     def on_ready(self) -> None:
+        # Initialize settings with defaults if not set
+        self._ensure_default_settings()
         self.update_key_image()
+
+    def _ensure_default_settings(self):
+        """Ensure settings have default values."""
+        settings = self.get_settings()
+        defaults = {
+            "msg_type": "note_on",
+            "channel": 0,
+            "data1": 60,
+            "data2": 100,
+        }
+        changed = False
+        for key, default in defaults.items():
+            if key not in settings:
+                settings[key] = default
+                changed = True
+        if changed:
+            self.set_settings(settings)
 
     def update_key_image(self):
         # Default icon
@@ -45,7 +71,7 @@ class SendMidiCommand(ActionBase):
         
         settings = self.get_settings()
         msg_type = settings.get("msg_type", "note_on")
-        data1 = settings.get("data1", 0)
+        data1 = settings.get("data1", 60)
         
         label = "MIDI"
         if msg_type == "note_on":
@@ -54,22 +80,26 @@ class SendMidiCommand(ActionBase):
             label = f"CC {data1}"
         elif msg_type == "program_change":
             label = f"PC {data1}"
+        elif msg_type == "pitchwheel":
+            label = f"PW {data1}"
             
         self.set_bottom_label(label, font_size=10)
 
     def on_key_down(self) -> None:
         if not self._midi_manager:
+            self.show_error(duration=1)
             return
 
         settings = self.get_settings()
         port_name = settings.get("port", "")
         if not port_name:
+            self.show_error(duration=1)
             return
 
         msg_type = settings.get("msg_type", "note_on")
         channel = settings.get("channel", 0)
-        data1 = settings.get("data1", 0)
-        data2 = settings.get("data2", 0)
+        data1 = settings.get("data1", 60)
+        data2 = settings.get("data2", 100)
 
         # Map UI 0-16 (if user sees 1-16) generally MIDI channels are 0-15 in mido
         # I'll assume 0-indexed for now to be safe, typically devs prefer 0-15.
@@ -81,15 +111,8 @@ class SendMidiCommand(ActionBase):
         elif msg_type == "program_change":
              self._midi_manager.send_program_change(port_name, channel, data1)
         elif msg_type == "pitchwheel":
-             # Mido pitchwheel takes 'pitch' argument, usually -8192 to 8191. 
-             # Let's map data1 (coarse) + data2 (fine) or just a single value? 
-             # Simpler: just use data1 as value? Or maybe create a combined value.
-             # Standard pitchwheel is often tricky. 
-             # Let's support data1 as the pitch value if manageable, 
-             # but SpinRow typically has a range. Pitch is large.
-             # Maybe skip pitchwheel for "basic" custom commands or implement properly.
-             # I'll stick to Note, CC, PC for now as they are most requested.
-             pass
+             # data1 is the pitch value (-8192 to 8191)
+             self._midi_manager.send_pitchwheel(port_name, channel, data1)
         elif msg_type == "note_off":
             self._midi_manager.send_note_off(port_name, channel, data1)
 
@@ -115,21 +138,13 @@ class SendMidiCommand(ActionBase):
 
         # -- Port Selection --
         self.port_model = Gtk.ListStore(str)
-        ports = []
-        if self._midi_manager:
-            ports = self._midi_manager.get_output_ports()
+        self._refresh_port_list()
         
-        if not ports:
-            self.port_model.append(["No MIDI ports found"])
-        else:
-            for port in ports:
-                self.port_model.append([port])
-        
-        port_row = ComboRow(title="MIDI Output Port", model=self.port_model)
+        self.port_row = ComboRow(title=self._lm("config.port"), model=self.port_model)
         
         renderer = Gtk.CellRendererText()
-        port_row.combo_box.pack_start(renderer, True)
-        port_row.combo_box.add_attribute(renderer, "text", 0)
+        self.port_row.combo_box.pack_start(renderer, True)
+        self.port_row.combo_box.add_attribute(renderer, "text", 0)
         
         current_port = settings.get("port", "")
         # Find index
@@ -138,19 +153,30 @@ class SendMidiCommand(ActionBase):
             if row[0] == current_port:
                 active_index = i
                 break
-        port_row.combo_box.set_active(active_index)
+        self.port_row.combo_box.set_active(active_index)
         
-        port_row.combo_box.connect("changed", self.on_port_changed)
-        rows.append(port_row)
+        self.port_row.combo_box.connect("changed", self.on_port_changed)
+        rows.append(self.port_row)
+
+        # -- Refresh Ports Button --
+        refresh_row = Adw.ActionRow()
+        refresh_row.set_title(self._lm("config.port.refresh"))
+        refresh_button = Gtk.Button()
+        refresh_button.set_icon_name("view-refresh-symbolic")
+        refresh_button.set_valign(Gtk.Align.CENTER)
+        refresh_button.connect("clicked", self._on_refresh_ports)
+        refresh_row.add_suffix(refresh_button)
+        rows.append(refresh_row)
 
         # -- Message Type --
         self.type_model = Gtk.ListStore(str, str) # Display, Internal Key
-        self.type_model.append(["Note On/Off", "note_on"])
-        self.type_model.append(["Control Change", "control_change"])
-        self.type_model.append(["Program Change", "program_change"])
-        self.type_model.append(["Note Off (Only)", "note_off"])
+        self.type_model.append([self._lm("config.msg_type.note_on"), "note_on"])
+        self.type_model.append([self._lm("config.msg_type.control_change"), "control_change"])
+        self.type_model.append([self._lm("config.msg_type.program_change"), "program_change"])
+        self.type_model.append([self._lm("config.msg_type.pitchwheel"), "pitchwheel"])
+        self.type_model.append([self._lm("config.msg_type.note_off"), "note_off"])
 
-        type_row = ComboRow(title="Message Type", model=self.type_model)
+        type_row = ComboRow(title=self._lm("config.msg_type"), model=self.type_model)
         renderer_type = Gtk.CellRendererText()
         type_row.combo_box.pack_start(renderer_type, True)
         type_row.combo_box.add_attribute(renderer_type, "text", 0)
@@ -167,13 +193,14 @@ class SendMidiCommand(ActionBase):
         
         # -- Channel --
         self.channel_row = Adw.SpinRow.new_with_range(0, 15, 1)
-        self.channel_row.set_title("Channel")
+        self.channel_row.set_title(self._lm("config.channel"))
         self.channel_row.set_value(settings.get("channel", 0))
         self.channel_row.connect("notify::value", self.on_channel_changed)
         rows.append(self.channel_row)
 
-        # -- Data 1 (Note/Control/Program) --
-        self.data1_row = Adw.SpinRow.new_with_range(0, 127, 1)
+        # -- Data 1 (Note/Control/Program/Pitch) --
+        # Default range 0-127, will be updated for pitchwheel
+        self.data1_row = Adw.SpinRow.new_with_range(-8192, 8191, 1)
         self.data1_row.set_value(settings.get("data1", 60))
         self.data1_row.connect("notify::value", self.on_data1_changed)
         rows.append(self.data1_row)
@@ -186,8 +213,25 @@ class SendMidiCommand(ActionBase):
 
         # Initial Label Update
         self.update_labels(current_type)
+        self._update_data1_range(current_type)
 
         return rows
+
+    def _update_data1_range(self, msg_type):
+        """Update the data1 spin row range based on message type."""
+        adjustment = self.data1_row.get_adjustment()
+        if msg_type == "pitchwheel":
+            adjustment.set_lower(-8192)
+            adjustment.set_upper(8191)
+        else:
+            adjustment.set_lower(0)
+            adjustment.set_upper(127)
+            # Clamp current value to new range
+            current = self.data1_row.get_value()
+            if current < 0:
+                self.data1_row.set_value(0)
+            elif current > 127:
+                self.data1_row.set_value(127)
 
     def on_port_changed(self, combo):
         tree_iter = combo.get_active_iter()
@@ -198,6 +242,34 @@ class SendMidiCommand(ActionBase):
             settings["port"] = port
             self.set_settings(settings)
 
+    def _refresh_port_list(self):
+        """Refresh the list of available MIDI ports."""
+        self.port_model.clear()
+        ports = []
+        if self._midi_manager:
+            ports = self._midi_manager.get_output_ports()
+        
+        if not ports:
+            self.port_model.append([self._lm("config.port.no_ports")])
+        else:
+            for port in ports:
+                self.port_model.append([port])
+
+    def _on_refresh_ports(self, button):
+        """Handle refresh ports button click."""
+        settings = self.get_settings()
+        current_port = settings.get("port", "")
+        
+        self._refresh_port_list()
+        
+        # Try to reselect the current port
+        active_index = 0
+        for i, row in enumerate(self.port_model):
+            if row[0] == current_port:
+                active_index = i
+                break
+        self.port_row.combo_box.set_active(active_index)
+
     def on_type_changed(self, combo):
         tree_iter = combo.get_active_iter()
         if tree_iter:
@@ -207,6 +279,7 @@ class SendMidiCommand(ActionBase):
             settings["msg_type"] = msg_type
             self.set_settings(settings)
             self.update_labels(msg_type)
+            self._update_data1_range(msg_type)
             self.update_key_image()
 
     def on_channel_changed(self, widget, param):
@@ -227,13 +300,16 @@ class SendMidiCommand(ActionBase):
 
     def update_labels(self, msg_type):
         if msg_type == "note_on" or msg_type == "note_off":
-            self.data1_row.set_title("Note Number")
-            self.data2_row.set_title("Velocity")
+            self.data1_row.set_title(self._lm("config.note"))
+            self.data2_row.set_title(self._lm("config.velocity"))
             self.data2_row.set_visible(True)
         elif msg_type == "control_change":
-            self.data1_row.set_title("Control Number")
-            self.data2_row.set_title("Value")
+            self.data1_row.set_title(self._lm("config.control_number"))
+            self.data2_row.set_title(self._lm("config.value"))
             self.data2_row.set_visible(True)
         elif msg_type == "program_change":
-            self.data1_row.set_title("Program Number")
+            self.data1_row.set_title(self._lm("config.program_number"))
+            self.data2_row.set_visible(False)
+        elif msg_type == "pitchwheel":
+            self.data1_row.set_title(self._lm("config.pitch_value"))
             self.data2_row.set_visible(False)
