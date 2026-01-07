@@ -7,6 +7,13 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Gtk, Adw
 
+# Import GtkHelper for ComboRow
+try:
+    from GtkHelper.GtkHelper import ComboRow
+except ImportError:
+    print("Failed to import GtkHelper. Using fallback or failing.")
+    ComboRow = None
+
 
 class SendNote(ActionBase):
     def __init__(self, *args, **kwargs):
@@ -54,37 +61,68 @@ class SendNote(ActionBase):
 
     def get_config_rows(self) -> list:
         """Return configuration rows for the action."""
+        if ComboRow is None:
+            return []
+
         settings = self.get_settings()
 
-        # MIDI Port selector
-        self.port_combo = Adw.ComboRow()
-        self.port_combo.set_title("MIDI Output Port")
-        self.port_combo.set_subtitle("Select the MIDI device to send to")
-
+        # Create ListStore for Gtk.ComboBox
+        # Column 0: Display Name (str)
+        self.model = Gtk.ListStore(str)
+        
+        ports = []
         if self._midi_manager:
             ports = self._midi_manager.get_output_ports()
-            port_list = Gtk.StringList.new(ports if ports else ["No MIDI ports found"])
-            self.port_combo.set_model(port_list)
-
-            # Set current selection
-            current_port = settings.get("port", "")
-            if current_port in ports:
-                self.port_combo.set_selected(ports.index(current_port))
+        
+        if not ports:
+            self.model.append(["No MIDI ports found"])
         else:
-            port_list = Gtk.StringList.new(["MidiManager not available"])
-            self.port_combo.set_model(port_list)
+            for port in ports:
+                self.model.append([port])
 
-        self.port_combo.connect("notify::selected", self._on_port_changed)
+        # Create ComboRow using GtkHelper
+        self.port_row = ComboRow(title="MIDI Output Port", model=self.model)
+        
+        # Setup CellRenderer for the internal ComboBox
+        renderer = Gtk.CellRendererText()
+        self.port_row.combo_box.pack_start(renderer, True)
+        self.port_row.combo_box.add_attribute(renderer, "text", 0)
 
-        return [self.port_combo]
+        # Set current selection
+        current_port = settings.get("port", "")
+        active_index = 0
+        found = False
+        
+        # Find index of current port
+        for i, row in enumerate(self.model):
+            if row[0] == current_port:
+                active_index = i
+                found = True
+                break
+        
+        if not found and ports:
+             # Default to first valid port if saved one not found
+             settings["port"] = ports[0]
+             self.set_settings(settings)
+             active_index = 0
+             
+        self.port_row.combo_box.set_active(active_index)
+        self.port_row.combo_box.connect("changed", self._on_port_changed)
 
-    def _on_port_changed(self, combo, _param) -> None:
+        return [self.port_row]
+
+    def _on_port_changed(self, combo, _param=None) -> None:
         """Handle port selection change."""
-        if self._midi_manager:
-            ports = self._midi_manager.get_output_ports()
-            if ports:
-                selected = combo.get_selected()
-                if selected < len(ports):
-                    settings = self.get_settings()
-                    settings["port"] = ports[selected]
-                    self.set_settings(settings)
+        tree_iter = combo.get_active_iter()
+        if tree_iter is not None:
+            model = combo.get_model()
+            port_name = model[tree_iter][0]
+            
+            # Ignore placeholder
+            if port_name == "No MIDI ports found":
+                return
+
+            settings = self.get_settings()
+            settings["port"] = port_name
+            self.set_settings(settings)
+            print(f"MIDI Plugin: Selected port '{port_name}'")
