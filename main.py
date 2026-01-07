@@ -4,6 +4,7 @@ from src.backend.PluginManager.ActionInputSupport import ActionInputSupport
 from src.backend.DeckManagement.InputIdentifier import Input
 
 from .actions.SendNote.SendNote import SendNote
+from .actions.SendMidiCommand.SendMidiCommand import SendMidiCommand
 
 
 class MidiPlugin(PluginBase):
@@ -23,6 +24,20 @@ class MidiPlugin(PluginBase):
             }
         )
         self.add_action_holder(self.send_note_holder)
+
+        # Register custom command action
+        self.send_command_holder = ActionHolder(
+            plugin_base=self,
+            action_base=SendMidiCommand,
+            action_id="com_github_pkern90_midi::SendMidiCommand",
+            action_name="Send MIDI Command",
+            action_support={
+                Input.Key: ActionInputSupport.SUPPORTED,
+                Input.Dial: ActionInputSupport.UNSUPPORTED,
+                Input.Touchscreen: ActionInputSupport.UNSUPPORTED,
+            }
+        )
+        self.add_action_holder(self.send_command_holder)
 
         # Register plugin
         self.register(

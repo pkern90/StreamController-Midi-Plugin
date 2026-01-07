@@ -36,21 +36,38 @@ class MidiManager:
     @classmethod
     def send_note_on(cls, port_name, channel, note, velocity):
         """Send a MIDI Note On message."""
-        port = cls._get_or_create_port(port_name)
-        if port:
-            try:
-                msg = mido.Message('note_on', channel=channel, note=note, velocity=velocity)
-                port.send(msg)
-            except Exception as e:
-                print(f"Error sending note on: {e}")
+        cls.send_message(port_name, 'note_on', channel=int(channel), note=int(note), velocity=int(velocity))
 
     @classmethod
     def send_note_off(cls, port_name, channel, note):
         """Send a MIDI Note Off message."""
+        cls.send_message(port_name, 'note_off', channel=int(channel), note=int(note), velocity=0)
+
+    @classmethod
+    def send_control_change(cls, port_name, channel, control, value):
+        """Send a MIDI Control Change message."""
+        cls.send_message(port_name, 'control_change', channel=int(channel), control=int(control), value=int(value))
+
+    @classmethod
+    def send_program_change(cls, port_name, channel, program):
+        """Send a MIDI Program Change message."""
+        cls.send_message(port_name, 'program_change', channel=int(channel), program=int(program))
+
+    @classmethod
+    def send_message(cls, port_name, msg_type, **kwargs):
+        """Send a generic MIDI message.
+        
+        Args:
+            port_name (str): The name of the MIDI output port.
+            msg_type (str): The type of MIDI message (e.g., 'note_on', 'control_change').
+            **kwargs: Additional arguments for the message (e.g., channel, note, velocity, control, value, program).
+        """
         port = cls._get_or_create_port(port_name)
         if port:
             try:
-                msg = mido.Message('note_off', channel=channel, note=note, velocity=0)
+                # Filter out None values from kwargs to avoid mido errors if optional args are passed as None
+                clean_kwargs = {k: v for k, v in kwargs.items() if v is not None}
+                msg = mido.Message(msg_type, **clean_kwargs)
                 port.send(msg)
             except Exception as e:
-                print(f"Error sending note off: {e}")
+                print(f"Error sending {msg_type}: {e}")

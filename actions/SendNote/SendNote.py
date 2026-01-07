@@ -37,27 +37,44 @@ class SendNote(ActionBase):
         icon_path = os.path.join(self.plugin_base.PATH, "assets", "note.png")
         if os.path.exists(icon_path):
             self.set_media(media_path=icon_path, size=0.75)
-        self.set_bottom_label("Note 60", font_size=14)
+        
+        settings = self.get_settings()
+        note = settings.get("note", 60)
+        self.set_bottom_label(f"Note {note}", font_size=14)
 
     def on_key_down(self) -> None:
-        # Send MIDI Note On (hardcoded: channel 0, note 60, velocity 100)
+        # Send MIDI Note On
         if self._midi_manager:
             settings = self.get_settings()
             port_name = settings.get("port", "")
+            channel = settings.get("channel", 0)
+            note = settings.get("note", 60)
+            velocity = settings.get("velocity", 100)
+            
             if port_name:
-                self._midi_manager.send_note_on(port_name, 0, 60, 100)
+                self._midi_manager.send_note_on(port_name, channel, note, velocity)
                 self._note_on = True
-        self.set_bottom_label("ON", font_size=14)
+        
+        # Update UI to show active state
+        settings = self.get_settings()
+        note = settings.get("note", 60)
+        self.set_bottom_label(f"Note {note} ON", font_size=12)
 
     def on_key_up(self) -> None:
         # Send MIDI Note Off
         if self._note_on and self._midi_manager:
             settings = self.get_settings()
             port_name = settings.get("port", "")
+            channel = settings.get("channel", 0)
+            note = settings.get("note", 60)
+            
             if port_name:
-                self._midi_manager.send_note_off(port_name, 0, 60)
+                self._midi_manager.send_note_off(port_name, channel, note)
             self._note_on = False
-        self.set_bottom_label("Note 60", font_size=14)
+            
+        settings = self.get_settings()
+        note = settings.get("note", 60)
+        self.set_bottom_label(f"Note {note}", font_size=14)
 
     def get_config_rows(self) -> list:
         """Return configuration rows for the action."""
@@ -91,38 +108,66 @@ class SendNote(ActionBase):
         # Set current selection
         current_port = settings.get("port", "")
         active_index = 0
-        found = False
         
         # Find index of current port
         for i, row in enumerate(self.model):
             if row[0] == current_port:
                 active_index = i
-                found = True
                 break
         
-        if not found and ports:
-             # Default to first valid port if saved one not found
-             settings["port"] = ports[0]
-             self.set_settings(settings)
-             active_index = 0
-             
         self.port_row.combo_box.set_active(active_index)
-        self.port_row.combo_box.connect("changed", self._on_port_changed)
+        
+        # Connect signal to save setting
+        self.port_row.combo_box.connect("changed", self.on_port_changed)
+        
+        rows = [self.port_row]
 
-        return [self.port_row]
+        # -- Channel --
+        self.channel_row = Adw.SpinRow.new_with_range(0, 15, 1)
+        self.channel_row.set_title("Channel")
+        self.channel_row.set_value(settings.get("channel", 0))
+        self.channel_row.connect("notify::value", self.on_channel_changed)
+        rows.append(self.channel_row)
 
-    def _on_port_changed(self, combo, _param=None) -> None:
-        """Handle port selection change."""
+        # -- Note --
+        self.note_row = Adw.SpinRow.new_with_range(0, 127, 1)
+        self.note_row.set_title("Note Number")
+        self.note_row.set_value(settings.get("note", 60))
+        self.note_row.connect("notify::value", self.on_note_changed)
+        rows.append(self.note_row)
+
+        # -- Velocity --
+        self.velocity_row = Adw.SpinRow.new_with_range(0, 127, 1)
+        self.velocity_row.set_title("Velocity")
+        self.velocity_row.set_value(settings.get("velocity", 100))
+        self.velocity_row.connect("notify::value", self.on_velocity_changed)
+        rows.append(self.velocity_row)
+
+        return rows
+
+    def on_port_changed(self, combo):
         tree_iter = combo.get_active_iter()
-        if tree_iter is not None:
+        if tree_iter:
             model = combo.get_model()
-            port_name = model[tree_iter][0]
-            
-            # Ignore placeholder
-            if port_name == "No MIDI ports found":
-                return
-
+            port = model[tree_iter][0]
             settings = self.get_settings()
-            settings["port"] = port_name
+            settings["port"] = port
             self.set_settings(settings)
-            print(f"MIDI Plugin: Selected port '{port_name}'")
+
+    def on_channel_changed(self, widget, param):
+        settings = self.get_settings()
+        settings["channel"] = int(widget.get_value())
+        self.set_settings(settings)
+
+    def on_note_changed(self, widget, param):
+        settings = self.get_settings()
+        settings["note"] = int(widget.get_value())
+        self.set_settings(settings)
+        # Update label
+        self.set_bottom_label(f"Note {settings['note']}", font_size=14)
+
+    def on_velocity_changed(self, widget, param):
+        settings = self.get_settings()
+        settings["velocity"] = int(widget.get_value())
+        self.set_settings(settings)
+
