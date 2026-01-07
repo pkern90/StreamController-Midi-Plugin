@@ -1,1 +1,2 @@
-# No dependencies for MVP - will add MIDI dependencies later
+mido>=1.3.0
+python-rtmidi>=1.5.0
