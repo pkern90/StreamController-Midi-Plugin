@@ -5,6 +5,7 @@ from src.backend.DeckManagement.InputIdentifier import Input
 
 from .actions.SendNote.SendNote import SendNote
 from .actions.SendMidiCommand.SendMidiCommand import SendMidiCommand
+from .actions.MidiDial.MidiDial import MidiDial
 
 
 class MidiPlugin(PluginBase):
@@ -39,10 +40,24 @@ class MidiPlugin(PluginBase):
         )
         self.add_action_holder(self.send_command_holder)
 
+        # Register dial action for Stream Deck+ knobs
+        self.midi_dial_holder = ActionHolder(
+            plugin_base=self,
+            action_base=MidiDial,
+            action_id="com_github_pkern90_midi::MidiDial",
+            action_name="MIDI Dial Control",
+            action_support={
+                Input.Key: ActionInputSupport.UNSUPPORTED,
+                Input.Dial: ActionInputSupport.SUPPORTED,
+                Input.Touchscreen: ActionInputSupport.UNTESTED,
+            }
+        )
+        self.add_action_holder(self.midi_dial_holder)
+
         # Register plugin
         self.register(
             plugin_name="MIDI",
             github_repo="https://github.com/pkern90/StreamController-Midi-Plugin",
-            plugin_version="1.0.0",
+            plugin_version="1.1.0",
             app_version="1.5.0-beta"
         )
