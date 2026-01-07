@@ -1,6 +1,11 @@
 from src.backend.PluginManager.ActionBase import ActionBase
-from plugins.com_github_pkern90_midi.internal.MidiManager import MidiManager
 import os
+
+try:
+    from ...internal.MidiManager import MidiManager
+except ImportError:
+    # Fallback if relative import fails
+    MidiManager = None
 
 
 class SendNote(ActionBase):
@@ -17,15 +22,16 @@ class SendNote(ActionBase):
 
     def on_key_down(self) -> None:
         # Send MIDI Note On (hardcoded: channel 0, note 60, velocity 100)
-        ports = MidiManager.get_output_ports()
-        if ports:
-            MidiManager.send_note_on(ports[0], 0, 60, 100)
-            self._note_on = True
-            self.set_bottom_label("ON", font_size=14)
+        if MidiManager:
+            ports = MidiManager.get_output_ports()
+            if ports:
+                MidiManager.send_note_on(ports[0], 0, 60, 100)
+                self._note_on = True
+        self.set_bottom_label("ON", font_size=14)
 
     def on_key_up(self) -> None:
         # Send MIDI Note Off
-        if self._note_on:
+        if self._note_on and MidiManager:
             ports = MidiManager.get_output_ports()
             if ports:
                 MidiManager.send_note_off(ports[0], 0, 60)
